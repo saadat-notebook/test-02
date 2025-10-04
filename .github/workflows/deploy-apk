@@ -1,0 +1,68 @@
+# Name of the GitHub Action
+name: Deploy New APK and Update JSON
+
+# This action runs automatically whenever a new release is 'published'
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # Step 1: Check out the 'main' branch specifically
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main # <-- THIS IS THE CRUCIAL FIX
+
+      # Step 2: Download the APK from the release
+      - name: Download release asset (app-release.apk)
+        uses: robinraju/release-downloader@v1.9
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ github.ref_name }}
+          fileName: "app-release.apk"
+          target: "downloads/"
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 3: Set up Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Step 4: Run a Node.js script to update the JSON
+      - name: Update apk-info.json using Node.js
+        run: |
+          const fs = require('fs');
+          const path = './apk-info.json';
+          const apkPath = './downloads/app-release.apk';
+          
+          const stats = fs.statSync(apkPath);
+          const fileSizeInMB = (stats.size / (1024 * 1024)).toFixed(1);
+          
+          const version = "${{ github.ref_name }}".replace('v', '');
+          const today = new Date().toISOString().slice(0, 10);
+          
+          const info = JSON.parse(fs.readFileSync(path, 'utf8'));
+          
+          info.version = version;
+          info.update_date = today;
+          info.size = `${fileSizeInMB} MB`;
+          info.apk_url = `./downloads/app-release.apk`;
+          
+          fs.writeFileSync(path, JSON.stringify(info, null, 2));
+          
+          console.log(`Updated ${path} to version ${version}, size ${fileSizeInMB} MB`);
+        shell: node {0}
+
+      # Step 5: Commit the updated files back to the 'main' branch
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: Auto-update APK to version ${{ github.ref_name }}"
+          file_pattern: "downloads/app-release.apk apk-info.json"
